@@ -55,8 +55,8 @@ async def config() -> dict[str, str]:
     return {
         "provider": provider,
         "openaiModel": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-        "xaiModel": os.getenv("XAI_MODEL", "latest"),
-        "claudeModel": os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-latest"),
+        "xaiModel": os.getenv("XAI_MODEL", "grok-4.3"),
+        "claudeModel": os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6"),
         "ollamaModel": os.getenv("OLLAMA_MODEL", "llama3.2"),
     }
 
@@ -118,7 +118,7 @@ async def xai_chat(request: ChatRequest) -> ChatResponse:
     if not api_key:
         raise HTTPException(status_code=400, detail="XAI_API_KEY is not set.")
 
-    model = request.model or os.getenv("XAI_MODEL", "latest")
+    model = request.model or os.getenv("XAI_MODEL", "grok-4.3")
     return await chat_completions_chat(
         provider="xai",
         url="https://api.x.ai/v1/chat/completions",
@@ -174,7 +174,7 @@ async def claude_chat(request: ChatRequest) -> ChatResponse:
     if not api_key:
         raise HTTPException(status_code=400, detail="CLAUDE_API_KEY is not set.")
 
-    model = request.model or os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-latest")
+    model = request.model or os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
     system_messages = [message.content for message in request.messages if message.role == "system"]
     chat_messages = [
         message.model_dump()

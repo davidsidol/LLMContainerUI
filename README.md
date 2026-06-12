@@ -39,7 +39,7 @@ Create `.env` from `.env.example`, then set:
 ```sh
 LLM_PROVIDER=xai
 XAI_API_KEY=your_key_here
-XAI_MODEL=latest
+XAI_MODEL=grok-4.3
 ```
 
 Restart:
@@ -55,7 +55,7 @@ Create `.env` from `.env.example`, then set:
 ```sh
 LLM_PROVIDER=claude
 CLAUDE_API_KEY=your_key_here
-CLAUDE_MODEL=claude-3-5-sonnet-latest
+CLAUDE_MODEL=claude-sonnet-4-6
 ```
 
 Restart:

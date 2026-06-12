@@ -42,8 +42,8 @@ function App() {
 
   const providerModel = useMemo(() => {
     if (provider === "openai") return config?.openaiModel || "gpt-4.1-mini";
-    if (provider === "xai") return config?.xaiModel || "latest";
-    if (provider === "claude") return config?.claudeModel || "claude-3-5-sonnet-latest";
+    if (provider === "xai") return config?.xaiModel || "grok-4.3";
+    if (provider === "claude") return config?.claudeModel || "claude-sonnet-4-6";
     if (provider === "ollama") return config?.ollamaModel || "llama3.2";
     return "local-demo";
   }, [config, provider]);
