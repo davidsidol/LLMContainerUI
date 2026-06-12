@@ -1,4 +1,5 @@
 import os
+from json import JSONDecodeError
 from typing import Literal
 
 import httpx
@@ -151,10 +152,16 @@ async def chat_completions_chat(
         )
 
     if response.status_code >= 400:
-        raise HTTPException(status_code=response.status_code, detail=response.text)
+        raise_provider_error(response)
 
-    data = response.json()
-    content = data["choices"][0]["message"]["content"]
+    data = parse_provider_json(response)
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"{provider} returned an unexpected response shape.",
+        ) from exc
     return ChatResponse(
         provider=provider,
         model=model,
@@ -194,9 +201,9 @@ async def claude_chat(request: ChatRequest) -> ChatResponse:
         )
 
     if response.status_code >= 400:
-        raise HTTPException(status_code=response.status_code, detail=response.text)
+        raise_provider_error(response)
 
-    data = response.json()
+    data = parse_provider_json(response)
     content = "".join(
         block.get("text", "")
         for block in data.get("content", [])
@@ -225,12 +232,35 @@ async def ollama_chat(request: ChatRequest) -> ChatResponse:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     if response.status_code >= 400:
-        raise HTTPException(status_code=response.status_code, detail=response.text)
+        raise_provider_error(response)
 
-    data = response.json()
+    data = parse_provider_json(response)
     content = data.get("message", {}).get("content", "")
     return ChatResponse(
         provider="ollama",
         model=model,
         message=ChatMessage(role="assistant", content=content),
     )
+
+
+def parse_provider_json(response: httpx.Response) -> dict:
+    try:
+        return response.json()
+    except JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Provider returned non-JSON response: {response.text[:500]}",
+        ) from exc
+
+
+def raise_provider_error(response: httpx.Response) -> None:
+    try:
+        payload = response.json()
+    except JSONDecodeError:
+        payload = response.text
+
+    detail = payload
+    if isinstance(payload, dict):
+        detail = payload.get("error") or payload.get("detail") or payload
+
+    raise HTTPException(status_code=response.status_code, detail=detail)

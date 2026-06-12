@@ -57,8 +57,7 @@ function App() {
     setError("");
     try {
       const response = await fetch("/api/config");
-      if (!response.ok) throw new Error("Backend config request failed.");
-      const data = await response.json();
+      const data = await readApiResponse(response);
       setConfig(data);
       setProvider(data.provider || "demo");
       setStatus("online");
@@ -89,10 +88,7 @@ function App() {
           messages: nextMessages,
         }),
       });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(typeof data.detail === "string" ? data.detail : "Chat request failed.");
-      }
+      const data = await readApiResponse(response);
       setMessages((current) => [...current, data.message]);
       setStatus("online");
     } catch (err) {
@@ -228,6 +224,27 @@ function App() {
       </section>
     </main>
   );
+}
+
+async function readApiResponse(response) {
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json")
+    ? await response.json()
+    : await response.text();
+
+  if (response.ok) {
+    return payload;
+  }
+
+  if (typeof payload === "string") {
+    throw new Error(payload || `Request failed with status ${response.status}.`);
+  }
+
+  if (typeof payload?.detail === "string") {
+    throw new Error(payload.detail);
+  }
+
+  throw new Error(`Request failed with status ${response.status}.`);
 }
 
 createRoot(document.getElementById("root")).render(<App />);
