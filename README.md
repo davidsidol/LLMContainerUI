@@ -18,6 +18,24 @@ Open http://localhost:3000.
 
 Postgres runs as part of the Compose stack and stores conversations in the `postgres_data` Docker volume.
 
+## Web Search
+
+The UI has a Brave web search toggle that can add current web results to any provider. Add a Brave Search API key to `.env`:
+
+```sh
+BRAVE_API_KEY=your_key_here
+BRAVE_SEARCH_COUNT=5
+BRAVE_SEARCH_FRESHNESS=pw
+```
+
+Freshness can be `pd` for 24 hours, `pw` for 7 days, `pm` for 31 days, or empty for no date filter.
+
+Restart:
+
+```sh
+docker compose up --build -d
+```
+
 ## Back Up Chat History
 
 ```sh

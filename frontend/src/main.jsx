@@ -4,6 +4,7 @@ import {
   Bot,
   CheckCircle2,
   CircleAlert,
+  Globe2,
   Loader2,
   MessageSquare,
   MonitorCog,
@@ -29,6 +30,7 @@ function App() {
   const [conversations, setConversations] = useState([]);
   const [conversationId, setConversationId] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(true);
+  const [webSearch, setWebSearch] = useState(false);
   const [input, setInput] = useState("");
   const [provider, setProvider] = useState("demo");
   const [model, setModel] = useState("local-demo");
@@ -133,12 +135,13 @@ function App() {
           provider,
           model,
           conversationId,
+          webSearch,
           messages: nextMessages,
         }),
       });
       const data = await readApiResponse(response);
       setConversationId(data.conversationId);
-      setMessages((current) => [...current, data.message]);
+      setMessages((current) => [...current, { ...data.message, sources: data.sources || [] }]);
       setStatus("online");
       await loadConversations();
     } catch (err) {
@@ -213,6 +216,27 @@ function App() {
           </div>
         </section>
 
+        <section className="panel">
+          <div className="panel-title">
+            <Globe2 size={18} />
+            <span>Search</span>
+          </div>
+          <label className="toggle-row">
+            <input
+              checked={webSearch}
+              disabled={config?.webSearchEnabled !== "true"}
+              onChange={(event) => setWebSearch(event.target.checked)}
+              type="checkbox"
+            />
+            <span>Use Brave web search</span>
+          </label>
+          <p className="panel-note">
+            {config?.webSearchEnabled === "true"
+              ? "Adds current web results to the selected model."
+              : "Add BRAVE_API_KEY to enable current web results."}
+          </p>
+        </section>
+
         <button className="secondary-button" type="button" onClick={loadConfig}>
           <RefreshCw size={17} />
           Refresh config
@@ -247,6 +271,17 @@ function App() {
               <div className="bubble">
                 <span>{message.role === "user" ? "You" : "Assistant"}</span>
                 <p>{message.content}</p>
+                {message.sources?.length ? (
+                  <div className="sources">
+                    <span>Sources</span>
+                    {message.sources.map((source, sourceIndex) => (
+                      <a href={source.url} key={source.url} rel="noreferrer" target="_blank">
+                        <strong>[{sourceIndex + 1}] {source.title}</strong>
+                        <small>{source.snippet}</small>
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </article>
           ))}

@@ -1,0 +1,7 @@
+.env
+.env.rtf
+__pycache__/
+*.py[cod]
+frontend/dist/
+frontend/node_modules/
+frontend/package-lock.json

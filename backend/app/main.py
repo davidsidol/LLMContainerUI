@@ -27,6 +27,13 @@ class ChatRequest(BaseModel):
     provider: Provider | None = None
     model: str | None = Field(default=None, max_length=100)
     conversationId: UUID | None = None
+    webSearch: bool = False
+
+
+class SearchSource(BaseModel):
+    title: str
+    url: str
+    snippet: str
 
 
 class ChatResponse(BaseModel):
@@ -34,6 +41,7 @@ class ChatResponse(BaseModel):
     model: str
     conversationId: UUID
     message: ChatMessage
+    sources: list[SearchSource] = Field(default_factory=list)
 
 
 class ConversationSummary(BaseModel):
@@ -83,6 +91,7 @@ async def config() -> dict[str, str]:
         "xaiModel": os.getenv("XAI_MODEL", "grok-4.3"),
         "claudeModel": os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6"),
         "ollamaModel": os.getenv("OLLAMA_MODEL", "llama3.2"),
+        "webSearchEnabled": "true" if os.getenv("BRAVE_API_KEY") else "false",
     }
 
 
@@ -148,24 +157,34 @@ async def chat(request: ChatRequest) -> ChatResponse:
     if latest_user:
         save_message(conversation_id, "user", latest_user.content, provider, request.model)
 
+    provider_request = request
+    sources: list[SearchSource] = []
+    if request.webSearch:
+        if not latest_user:
+            raise HTTPException(status_code=400, detail="Web search requires a user message.")
+        sources = await brave_search(latest_user.content)
+        provider_request = request_with_search_context(request, sources)
+
     if provider == "openai":
-        response = await openai_chat(request)
+        response = await openai_chat(provider_request)
     if provider == "xai":
-        response = await xai_chat(request)
+        response = await xai_chat(provider_request)
     if provider == "claude":
-        response = await claude_chat(request)
+        response = await claude_chat(provider_request)
     if provider == "ollama":
-        response = await ollama_chat(request)
+        response = await ollama_chat(provider_request)
     if provider == "demo":
-        response = demo_chat(request)
+        response = demo_chat(provider_request)
     if provider not in ("openai", "xai", "claude", "ollama", "demo"):
         raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
     response.conversationId = conversation_id
+    response.sources = sources
+    content_to_save = append_sources(response.message.content, sources)
     save_message(
         conversation_id,
         "assistant",
-        response.message.content,
+        content_to_save,
         response.provider,
         response.model,
     )
@@ -178,12 +197,18 @@ def demo_chat(request: ChatRequest) -> ChatResponse:
         (message.content for message in reversed(request.messages) if message.role == "user"),
         "",
     )
-    content = (
-        "Demo mode is working. I received your message and the container stack is healthy.\n\n"
-        f"You said: {latest_user}\n\n"
-        "Set LLM_PROVIDER to openai, xai, claude, or ollama with the matching API settings "
-        "to connect this UI to a real model."
-    )
+    if has_search_context(request):
+        content = (
+            "Demo mode found web search context and would pass it to the selected model.\n\n"
+            f"You said: {latest_user}"
+        )
+    else:
+        content = (
+            "Demo mode is working. I received your message and the container stack is healthy.\n\n"
+            f"You said: {latest_user}\n\n"
+            "Set LLM_PROVIDER to openai, xai, claude, or ollama with the matching API settings "
+            "to connect this UI to a real model."
+        )
     return ChatResponse(
         provider="demo",
         model="local-demo",
@@ -481,6 +506,95 @@ def title_from_message(content: str) -> str:
     if not normalized:
         return "New conversation"
     return normalized[:57] + "..." if len(normalized) > 60 else normalized
+
+
+async def brave_search(query: str) -> list[SearchSource]:
+    api_key = os.getenv("BRAVE_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="BRAVE_API_KEY is not set.")
+
+    count = int(os.getenv("BRAVE_SEARCH_COUNT", "5"))
+    freshness = os.getenv("BRAVE_SEARCH_FRESHNESS", "pw")
+    params = {
+        "q": query,
+        "count": max(1, min(count, 10)),
+        "country": os.getenv("BRAVE_SEARCH_COUNTRY", "US"),
+        "search_lang": os.getenv("BRAVE_SEARCH_LANG", "en"),
+        "safesearch": os.getenv("BRAVE_SAFESEARCH", "moderate"),
+        "extra_snippets": "true",
+    }
+    if freshness:
+        params["freshness"] = freshness
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(
+            "https://api.search.brave.com/res/v1/web/search",
+            headers={
+                "Accept": "application/json",
+                "X-Subscription-Token": api_key,
+            },
+            params=params,
+        )
+
+    if response.status_code >= 400:
+        raise_provider_error(response)
+
+    data = parse_provider_json(response)
+    results = data.get("web", {}).get("results", [])
+    sources: list[SearchSource] = []
+    for result in results[: params["count"]]:
+        title = clean_text(result.get("title", ""))
+        url = result.get("url", "")
+        snippets = [result.get("description", ""), *result.get("extra_snippets", [])]
+        snippet = clean_text(" ".join(snippet for snippet in snippets if snippet))
+        if title and url and snippet:
+            sources.append(SearchSource(title=title, url=url, snippet=snippet[:900]))
+
+    if not sources:
+        raise HTTPException(status_code=502, detail="Brave Search returned no usable results.")
+
+    return sources
+
+
+def request_with_search_context(request: ChatRequest, sources: list[SearchSource]) -> ChatRequest:
+    context = format_search_context(sources)
+    system_prompt = (
+        "Use the provided web search context when it is relevant. "
+        "Prefer recent facts from the search context over your training data. "
+        "Cite sources inline using bracket numbers like [1], [2]. "
+        "If the search context is insufficient, say what is missing instead of guessing.\n\n"
+        f"{context}"
+    )
+    return request.model_copy(
+        update={
+            "messages": [ChatMessage(role="system", content=system_prompt), *request.messages],
+        }
+    )
+
+
+def format_search_context(sources: list[SearchSource]) -> str:
+    lines = ["Web search context:"]
+    for index, source in enumerate(sources, start=1):
+        lines.append(f"[{index}] {source.title}\nURL: {source.url}\nSnippet: {source.snippet}")
+    return "\n\n".join(lines)
+
+
+def append_sources(content: str, sources: list[SearchSource]) -> str:
+    if not sources:
+        return content
+    source_lines = [
+        "\n\nSources:",
+        *[f"[{index}] {source.title} - {source.url}" for index, source in enumerate(sources, start=1)],
+    ]
+    return f"{content.rstrip()}{chr(10).join(source_lines)}"
+
+
+def has_search_context(request: ChatRequest) -> bool:
+    return any(message.role == "system" and "Web search context:" in message.content for message in request.messages)
+
+
+def clean_text(value: str) -> str:
+    return " ".join(value.replace("\n", " ").split())
 
 
 def parse_provider_json(response: httpx.Response) -> dict:
