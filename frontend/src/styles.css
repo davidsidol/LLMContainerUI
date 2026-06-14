@@ -41,6 +41,8 @@ textarea {
   flex-direction: column;
   gap: 18px;
   padding: 28px;
+  max-height: 100vh;
+  overflow-y: auto;
   border-right: 1px solid #d9d3c8;
   background: rgba(255, 255, 255, 0.68);
   backdrop-filter: blur(12px);
@@ -82,7 +84,8 @@ textarea {
   font-size: 0.86rem;
 }
 
-.panel {
+.panel,
+.history-panel {
   display: grid;
   gap: 14px;
   padding: 18px;
@@ -94,6 +97,7 @@ textarea {
 
 .panel-title,
 .status,
+.primary-action,
 .secondary-button {
   display: flex;
   align-items: center;
@@ -146,18 +150,100 @@ textarea {
   background: #f9e9e4;
 }
 
+.primary-action,
 .secondary-button {
   justify-content: center;
   min-height: 42px;
   border: 1px solid #cfc7b9;
   border-radius: 8px;
+  cursor: pointer;
+}
+
+.primary-action {
+  color: #ffffff;
+  background: #204e63;
+  border-color: #204e63;
+  font-weight: 800;
+}
+
+.secondary-button {
   color: #233139;
   background: #ffffff;
-  cursor: pointer;
 }
 
 .secondary-button:hover {
   border-color: #204e63;
+}
+
+.history-panel {
+  gap: 12px;
+}
+
+.history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.history-item > button:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  min-height: 46px;
+  border: 1px solid #d8d0c2;
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: #243139;
+  text-align: left;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.history-item.active > button:first-child {
+  border-color: #204e63;
+  background: #edf5f7;
+}
+
+.history-item span,
+.history-item small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-item span {
+  font-size: 0.87rem;
+  font-weight: 800;
+}
+
+.history-item small {
+  color: #66727b;
+  font-size: 0.73rem;
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  min-height: 46px;
+  border: 1px solid #d8d0c2;
+  border-radius: 8px;
+  color: #7d3b31;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.empty-history {
+  margin: 0;
+  color: #66727b;
+  font-size: 0.86rem;
 }
 
 .chat {

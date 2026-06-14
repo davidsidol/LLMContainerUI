@@ -5,10 +5,13 @@ import {
   CheckCircle2,
   CircleAlert,
   Loader2,
+  MessageSquare,
   MonitorCog,
+  Plus,
   RefreshCw,
   Send,
   Sparkles,
+  Trash2,
   User,
 } from "lucide-react";
 import "./styles.css";
@@ -23,6 +26,8 @@ const starterMessages = [
 
 function App() {
   const [messages, setMessages] = useState(starterMessages);
+  const [conversations, setConversations] = useState([]);
+  const [conversationId, setConversationId] = useState(null);
   const [input, setInput] = useState("");
   const [provider, setProvider] = useState("demo");
   const [model, setModel] = useState("local-demo");
@@ -34,6 +39,7 @@ function App() {
 
   useEffect(() => {
     loadConfig();
+    loadConversations();
   }, []);
 
   useEffect(() => {
@@ -67,6 +73,46 @@ function App() {
     }
   }
 
+  async function loadConversations() {
+    try {
+      const response = await fetch("/api/conversations");
+      const data = await readApiResponse(response);
+      setConversations(data);
+    } catch (err) {
+      setError(err.message || "Could not load chat history.");
+    }
+  }
+
+  async function loadConversation(id) {
+    setError("");
+    try {
+      const response = await fetch(`/api/conversations/${id}`);
+      const data = await readApiResponse(response);
+      setConversationId(data.id);
+      setMessages(data.messages.length ? data.messages : starterMessages);
+      if (data.provider) setProvider(data.provider);
+      if (data.model) setModel(data.model);
+      setStatus("online");
+    } catch (err) {
+      setStatus("offline");
+      setError(err.message || "Could not load that conversation.");
+    }
+  }
+
+  async function deleteConversation(id) {
+    setError("");
+    try {
+      const response = await fetch(`/api/conversations/${id}`, { method: "DELETE" });
+      await readApiResponse(response);
+      if (conversationId === id) {
+        startNewChat();
+      }
+      await loadConversations();
+    } catch (err) {
+      setError(err.message || "Could not delete that conversation.");
+    }
+  }
+
   async function sendMessage(event) {
     event.preventDefault();
     const trimmed = input.trim();
@@ -85,12 +131,15 @@ function App() {
         body: JSON.stringify({
           provider,
           model,
+          conversationId,
           messages: nextMessages,
         }),
       });
       const data = await readApiResponse(response);
+      setConversationId(data.conversationId);
       setMessages((current) => [...current, data.message]);
       setStatus("online");
+      await loadConversations();
     } catch (err) {
       setError(err.message || "Something went wrong.");
       setStatus("offline");
@@ -108,6 +157,11 @@ function App() {
   }
 
   function clearChat() {
+    startNewChat();
+  }
+
+  function startNewChat() {
+    setConversationId(null);
     setMessages(starterMessages);
     setError("");
   }
@@ -124,6 +178,11 @@ function App() {
             <p>React + FastAPI + Docker Compose</p>
           </div>
         </div>
+
+        <button className="primary-action" type="button" onClick={startNewChat}>
+          <Plus size={17} />
+          New chat
+        </button>
 
         <section className="panel">
           <div className="panel-title">
@@ -160,6 +219,41 @@ function App() {
         <button className="secondary-button" type="button" onClick={clearChat}>
           Clear chat
         </button>
+
+        <section className="history-panel">
+          <div className="panel-title">
+            <MessageSquare size={18} />
+            <span>History</span>
+          </div>
+          <div className="history-list">
+            {conversations.length ? (
+              conversations.map((conversation) => (
+                <div
+                  className={`history-item ${conversation.id === conversationId ? "active" : ""}`}
+                  key={conversation.id}
+                >
+                  <button type="button" onClick={() => loadConversation(conversation.id)}>
+                    <span>{conversation.title}</span>
+                    <small>
+                      {conversation.provider || "demo"}
+                      {conversation.model ? ` · ${conversation.model}` : ""}
+                    </small>
+                  </button>
+                  <button
+                    aria-label={`Delete ${conversation.title}`}
+                    className="icon-button"
+                    type="button"
+                    onClick={() => deleteConversation(conversation.id)}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))
+            ) : (
+              <p className="empty-history">No saved chats yet.</p>
+            )}
+          </div>
+        </section>
       </aside>
 
       <section className="chat">

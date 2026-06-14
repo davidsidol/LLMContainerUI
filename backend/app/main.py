@@ -1,8 +1,13 @@
 import os
+import time
+from datetime import UTC, datetime
 from json import JSONDecodeError
+from uuid import UUID
 from typing import Literal
 
 import httpx
+import psycopg
+from psycopg.rows import dict_row
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -21,12 +26,27 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=100)
     provider: Provider | None = None
     model: str | None = Field(default=None, max_length=100)
+    conversationId: UUID | None = None
 
 
 class ChatResponse(BaseModel):
     provider: Provider
     model: str
+    conversationId: UUID
     message: ChatMessage
+
+
+class ConversationSummary(BaseModel):
+    id: UUID
+    title: str
+    provider: Provider | None
+    model: str | None
+    updatedAt: datetime
+    createdAt: datetime
+
+
+class ConversationDetail(ConversationSummary):
+    messages: list[ChatMessage]
 
 
 def env_list(name: str, default: str) -> list[str]:
@@ -42,6 +62,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def startup() -> None:
+    init_db()
 
 
 @app.get("/api/health")
@@ -61,22 +86,91 @@ async def config() -> dict[str, str]:
     }
 
 
+@app.get("/api/conversations", response_model=list[ConversationSummary])
+async def conversations() -> list[ConversationSummary]:
+    with db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, title, provider, model, updated_at, created_at
+            FROM conversations
+            ORDER BY updated_at DESC
+            LIMIT 100
+            """
+        ).fetchall()
+    return [conversation_summary(row) for row in rows]
+
+
+@app.get("/api/conversations/{conversation_id}", response_model=ConversationDetail)
+async def conversation(conversation_id: UUID) -> ConversationDetail:
+    with db_connection() as conn:
+        conversation_row = conn.execute(
+            """
+            SELECT id, title, provider, model, updated_at, created_at
+            FROM conversations
+            WHERE id = %s
+            """,
+            (conversation_id,),
+        ).fetchone()
+        if not conversation_row:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+
+        message_rows = conn.execute(
+            """
+            SELECT role, content
+            FROM messages
+            WHERE conversation_id = %s
+            ORDER BY created_at ASC, id ASC
+            """,
+            (conversation_id,),
+        ).fetchall()
+
+    return ConversationDetail(
+        **conversation_summary(conversation_row).model_dump(),
+        messages=[ChatMessage(role=row["role"], content=row["content"]) for row in message_rows],
+    )
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: UUID) -> dict[str, str]:
+    with db_connection() as conn:
+        result = conn.execute("DELETE FROM conversations WHERE id = %s", (conversation_id,))
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+        conn.commit()
+    return {"status": "deleted"}
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
     provider = request.provider or os.getenv("LLM_PROVIDER", "demo")
+    conversation_id = ensure_conversation(request, provider)
+    latest_user = latest_user_message(request)
+    if latest_user:
+        save_message(conversation_id, "user", latest_user.content, provider, request.model)
 
     if provider == "openai":
-        return await openai_chat(request)
+        response = await openai_chat(request)
     if provider == "xai":
-        return await xai_chat(request)
+        response = await xai_chat(request)
     if provider == "claude":
-        return await claude_chat(request)
+        response = await claude_chat(request)
     if provider == "ollama":
-        return await ollama_chat(request)
+        response = await ollama_chat(request)
     if provider == "demo":
-        return demo_chat(request)
+        response = demo_chat(request)
+    if provider not in ("openai", "xai", "claude", "ollama", "demo"):
+        raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
-    raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
+    response.conversationId = conversation_id
+    save_message(
+        conversation_id,
+        "assistant",
+        response.message.content,
+        response.provider,
+        response.model,
+    )
+    update_conversation_model(conversation_id, response.provider, response.model)
+    return response
 
 
 def demo_chat(request: ChatRequest) -> ChatResponse:
@@ -93,6 +187,7 @@ def demo_chat(request: ChatRequest) -> ChatResponse:
     return ChatResponse(
         provider="demo",
         model="local-demo",
+        conversationId=request.conversationId or UUID(int=0),
         message=ChatMessage(role="assistant", content=content),
     )
 
@@ -165,6 +260,7 @@ async def chat_completions_chat(
     return ChatResponse(
         provider=provider,
         model=model,
+        conversationId=request.conversationId or UUID(int=0),
         message=ChatMessage(role="assistant", content=content),
     )
 
@@ -212,6 +308,7 @@ async def claude_chat(request: ChatRequest) -> ChatResponse:
     return ChatResponse(
         provider="claude",
         model=model,
+        conversationId=request.conversationId or UUID(int=0),
         message=ChatMessage(role="assistant", content=content),
     )
 
@@ -239,8 +336,151 @@ async def ollama_chat(request: ChatRequest) -> ChatResponse:
     return ChatResponse(
         provider="ollama",
         model=model,
+        conversationId=request.conversationId or UUID(int=0),
         message=ChatMessage(role="assistant", content=content),
     )
+
+
+def database_url() -> str:
+    return os.getenv("DATABASE_URL", "postgresql://llm_chat:llm_chat_password@postgres:5432/llm_chat")
+
+
+def db_connection() -> psycopg.Connection:
+    return psycopg.connect(database_url(), row_factory=dict_row)
+
+
+def init_db() -> None:
+    last_error: Exception | None = None
+    for _ in range(20):
+        try:
+            with db_connection() as conn:
+                conn.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS conversations (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        title TEXT NOT NULL,
+                        provider TEXT,
+                        model TEXT,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS messages (
+                        id BIGSERIAL PRIMARY KEY,
+                        conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                        role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant')),
+                        provider TEXT,
+                        model TEXT,
+                        content TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_messages_conversation_created
+                    ON messages (conversation_id, created_at, id)
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_conversations_updated
+                    ON conversations (updated_at DESC)
+                    """
+                )
+                conn.commit()
+                return
+        except psycopg.OperationalError as exc:
+            last_error = exc
+            time.sleep(1)
+    raise RuntimeError("Database is not available.") from last_error
+
+
+def ensure_conversation(request: ChatRequest, provider: Provider) -> UUID:
+    if request.conversationId:
+        with db_connection() as conn:
+            row = conn.execute(
+                "SELECT id FROM conversations WHERE id = %s",
+                (request.conversationId,),
+            ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+        return request.conversationId
+
+    latest_user = latest_user_message(request)
+    title = title_from_message(latest_user.content if latest_user else "New conversation")
+    with db_connection() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO conversations (title, provider, model)
+            VALUES (%s, %s, %s)
+            RETURNING id
+            """,
+            (title, provider, request.model),
+        ).fetchone()
+        conn.commit()
+    return row["id"]
+
+
+def latest_user_message(request: ChatRequest) -> ChatMessage | None:
+    return next((message for message in reversed(request.messages) if message.role == "user"), None)
+
+
+def save_message(
+    conversation_id: UUID,
+    role: Role,
+    content: str,
+    provider: Provider | None,
+    model: str | None,
+) -> None:
+    with db_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO messages (conversation_id, role, provider, model, content)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (conversation_id, role, provider, model, content),
+        )
+        conn.execute(
+            "UPDATE conversations SET updated_at = now() WHERE id = %s",
+            (conversation_id,),
+        )
+        conn.commit()
+
+
+def update_conversation_model(conversation_id: UUID, provider: Provider, model: str) -> None:
+    with db_connection() as conn:
+        conn.execute(
+            """
+            UPDATE conversations
+            SET provider = %s, model = %s, updated_at = now()
+            WHERE id = %s
+            """,
+            (provider, model, conversation_id),
+        )
+        conn.commit()
+
+
+def conversation_summary(row: dict) -> ConversationSummary:
+    return ConversationSummary(
+        id=row["id"],
+        title=row["title"],
+        provider=row["provider"],
+        model=row["model"],
+        updatedAt=row["updated_at"],
+        createdAt=row["created_at"],
+    )
+
+
+def title_from_message(content: str) -> str:
+    normalized = " ".join(content.split())
+    if not normalized:
+        return "New conversation"
+    return normalized[:57] + "..." if len(normalized) > 60 else normalized
 
 
 def parse_provider_json(response: httpx.Response) -> dict:

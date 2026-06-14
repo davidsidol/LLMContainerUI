@@ -1,6 +1,6 @@
 # LLM Container UI
 
-A Docker Compose chat app with a React UI and FastAPI backend. It supports:
+A Docker Compose chat app with a React UI, FastAPI backend, and Postgres chat history. It supports:
 
 - `demo`: local canned responses so the UI works immediately
 - `openai`: OpenAI Chat Completions API
@@ -15,6 +15,14 @@ docker compose up --build -d
 ```
 
 Open http://localhost:3000.
+
+Postgres runs as part of the Compose stack and stores conversations in the `postgres_data` Docker volume.
+
+## Back Up Chat History
+
+```sh
+docker compose exec -T postgres pg_dump -U llm_chat llm_chat > llm_chat_backup.sql
+```
 
 ## OpenAI
 

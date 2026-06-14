@@ -1,10 +1,30 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: llm-chat-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-llm_chat}
+      POSTGRES_USER: ${POSTGRES_USER:-llm_chat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-llm_chat_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-llm_chat} -d ${POSTGRES_DB:-llm_chat}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   backend:
     build:
       context: ./backend
     container_name: llm-chat-backend
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://llm_chat:llm_chat_password@postgres:5432/llm_chat}
       LLM_PROVIDER: ${LLM_PROVIDER:-demo}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
@@ -38,3 +58,6 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+volumes:
+  postgres_data:
