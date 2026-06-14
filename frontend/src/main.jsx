@@ -28,6 +28,7 @@ function App() {
   const [messages, setMessages] = useState(starterMessages);
   const [conversations, setConversations] = useState([]);
   const [conversationId, setConversationId] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(true);
   const [input, setInput] = useState("");
   const [provider, setProvider] = useState("demo");
   const [model, setModel] = useState("local-demo");
@@ -219,41 +220,6 @@ function App() {
         <button className="secondary-button" type="button" onClick={clearChat}>
           Clear chat
         </button>
-
-        <section className="history-panel">
-          <div className="panel-title">
-            <MessageSquare size={18} />
-            <span>History</span>
-          </div>
-          <div className="history-list">
-            {conversations.length ? (
-              conversations.map((conversation) => (
-                <div
-                  className={`history-item ${conversation.id === conversationId ? "active" : ""}`}
-                  key={conversation.id}
-                >
-                  <button type="button" onClick={() => loadConversation(conversation.id)}>
-                    <span>{conversation.title}</span>
-                    <small>
-                      {conversation.provider || "demo"}
-                      {conversation.model ? ` · ${conversation.model}` : ""}
-                    </small>
-                  </button>
-                  <button
-                    aria-label={`Delete ${conversation.title}`}
-                    className="icon-button"
-                    type="button"
-                    onClick={() => deleteConversation(conversation.id)}
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              ))
-            ) : (
-              <p className="empty-history">No saved chats yet.</p>
-            )}
-          </div>
-        </section>
       </aside>
 
       <section className="chat">
@@ -316,6 +282,55 @@ function App() {
           </button>
         </form>
       </section>
+
+      <aside className={`history-dock ${historyOpen ? "open" : "closed"}`}>
+        <button
+          className="history-tab"
+          type="button"
+          onClick={() => setHistoryOpen((open) => !open)}
+          aria-expanded={historyOpen}
+        >
+          <MessageSquare size={18} />
+          <span>History</span>
+        </button>
+
+        {historyOpen ? (
+          <section className="history-panel">
+            <div className="panel-title">
+              <MessageSquare size={18} />
+              <span>Browse history</span>
+            </div>
+            <div className="history-list">
+              {conversations.length ? (
+                conversations.map((conversation) => (
+                  <div
+                    className={`history-item ${conversation.id === conversationId ? "active" : ""}`}
+                    key={conversation.id}
+                  >
+                    <button type="button" onClick={() => loadConversation(conversation.id)}>
+                      <span>{conversation.title}</span>
+                      <small>
+                        {conversation.provider || "demo"}
+                        {conversation.model ? ` · ${conversation.model}` : ""}
+                      </small>
+                    </button>
+                    <button
+                      aria-label={`Delete ${conversation.title}`}
+                      className="icon-button"
+                      type="button"
+                      onClick={() => deleteConversation(conversation.id)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <p className="empty-history">No saved chats yet.</p>
+              )}
+            </div>
+          </section>
+        ) : null}
+      </aside>
     </main>
   );
 }

@@ -28,7 +28,7 @@ textarea {
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr) auto;
   min-height: 100vh;
   background:
     linear-gradient(135deg, rgba(38, 93, 128, 0.08), transparent 42%),
@@ -177,6 +177,56 @@ textarea {
 
 .history-panel {
   gap: 12px;
+}
+
+.history-dock {
+  position: relative;
+  display: grid;
+  grid-template-columns: 46px minmax(250px, 330px);
+  height: 100vh;
+  border-left: 1px solid #d9d3c8;
+  background: rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(12px);
+}
+
+.history-dock.closed {
+  grid-template-columns: 46px;
+}
+
+.history-dock .history-panel {
+  align-self: stretch;
+  min-width: 0;
+  margin: 28px 24px 28px 0;
+  overflow: hidden;
+}
+
+.history-dock .history-list {
+  align-content: start;
+  max-height: calc(100vh - 126px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.history-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 46px;
+  min-height: 100vh;
+  border: 0;
+  border-right: 1px solid #d9d3c8;
+  color: #204e63;
+  background: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 800;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+.history-tab svg {
+  transform: rotate(90deg);
 }
 
 .history-list {
@@ -430,6 +480,34 @@ textarea {
   .chat {
     height: auto;
     min-height: 68vh;
+  }
+
+  .history-dock,
+  .history-dock.closed {
+    grid-template-columns: 1fr;
+    height: auto;
+    border-left: 0;
+    border-top: 1px solid #d9d3c8;
+  }
+
+  .history-tab {
+    width: 100%;
+    min-height: 46px;
+    border-right: 0;
+    border-bottom: 1px solid #d9d3c8;
+    writing-mode: horizontal-tb;
+  }
+
+  .history-tab svg {
+    transform: none;
+  }
+
+  .history-dock .history-panel {
+    margin: 18px;
+  }
+
+  .history-dock .history-list {
+    max-height: 320px;
   }
 
   .chat-header {
