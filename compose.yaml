@@ -3,6 +3,7 @@ services:
     build:
       context: ./backend
     container_name: llm-chat-backend
+    restart: unless-stopped
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-demo}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -26,6 +27,7 @@ services:
     build:
       context: ./frontend
     container_name: llm-chat-frontend
+    restart: unless-stopped
     depends_on:
       backend:
         condition: service_healthy
